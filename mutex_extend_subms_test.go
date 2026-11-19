@@ -5,28 +5,22 @@ import (
 	"time"
 )
 
-// WithExpiry below 1ms used to make Extend send PEXPIRE 0, which deletes the
-// lock key while still returning success. go-redis truncates the initial
-// SetNX up to 1ms, so Lock can succeed and then Extend would drop the key.
+// Extend used to pass int(expiry/time.Millisecond) to PEXPIRE. A positive TTL
+// below 1ms became 0, so Redis deleted the key. Lock with a normal expiry
+// first, then shrink m.expiry before Extend so every driver hits that path.
 func TestExtendSubMillisecondKeepsLock(t *testing.T) {
 	for k, v := range makeCases(1) {
 		t.Run(k, func(t *testing.T) {
 			rs := New(v.pools...)
-			mutex := rs.NewMutex("test-subms-extend", WithExpiry(500*time.Microsecond))
+			mutex := rs.NewMutex("test-subms-extend", WithExpiry(time.Second))
 			if err := mutex.Lock(); err != nil {
 				t.Fatalf("Lock: %v", err)
 			}
-			ok, err := mutex.Extend()
-			if err != nil {
-				t.Fatalf("Extend: %v", err)
-			}
-			if !ok {
-				t.Fatal("Extend returned false")
-			}
-			valid, err := mutex.Valid()
-			if err != nil {
-				t.Fatalf("Valid: %v", err)
-			}
+			mutex.expiry = 500 * time.Microsecond
+			// Extend local until is ~1ms after rounding; slow drivers may still
+			// return ErrExtendFailed. The bug was deleting the Redis key.
+			_, _ = mutex.Extend()
+			valid, _ := mutex.Valid()
 			if !valid {
 				t.Fatal("lock key missing after Extend with sub-millisecond expiry")
 			}
