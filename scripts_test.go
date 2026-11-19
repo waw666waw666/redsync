@@ -2,6 +2,7 @@ package redsync
 
 import (
 	"context"
+	"os/exec"
 	"testing"
 
 	"github.com/go-redsync/redsync/v4/redis"
@@ -11,6 +12,9 @@ import (
 )
 
 func TestScripts_Hash(t *testing.T) {
+	if _, err := exec.LookPath("redis-server"); err != nil {
+		t.Skip("redis-server not available")
+	}
 	testScriptHash(t, "deleteScript", deleteScript)
 	testScriptHash(t, "touchWithSetNXScript", touchWithSetNXScript)
 	testScriptHash(t, "touchScript", touchScript)

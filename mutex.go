@@ -157,14 +157,21 @@ func (m *Mutex) Extend() (bool, error) {
 // ExtendContext resets the mutex's expiry and returns the status of expiry extension.
 func (m *Mutex) ExtendContext(ctx context.Context) (bool, error) {
 	start := time.Now()
+	expiry := expiryMillis(m.expiry)
 	n, err := m.actOnPoolsAsync(func(pool redis.Pool) (bool, error) {
-		return m.touch(ctx, pool, m.value, int(m.expiry/time.Millisecond))
+		return m.touch(ctx, pool, m.value, expiry)
 	})
 	if n < m.quorum {
 		return false, err
 	}
 	now := time.Now()
-	until := now.Add(m.expiry - now.Sub(start) - time.Duration(int64(float64(m.expiry)*m.driftFactor)))
+	// Use the same millisecond TTL sent to Redis so sub-millisecond expiries
+	// that round up to 1ms do not fail the local validity window.
+	effective := time.Duration(expiry) * time.Millisecond
+	if effective <= 0 {
+		effective = m.expiry
+	}
+	until := now.Add(effective - now.Sub(start) - time.Duration(int64(float64(effective)*m.driftFactor)))
 	if now.Before(until) {
 		m.until = until
 		return true, nil
@@ -216,6 +223,20 @@ func genValue() (string, error) {
 		return "", err
 	}
 	return base64.StdEncoding.EncodeToString(b), nil
+}
+
+// expiryMillis converts a lock expiry to the millisecond TTL passed to Redis.
+// Sub-millisecond positive durations round up to 1ms. Truncating them to 0
+// would make PEXPIRE delete the key while Extend still reports success.
+func expiryMillis(d time.Duration) int {
+	if d <= 0 {
+		return 0
+	}
+	ms := int(d / time.Millisecond)
+	if ms == 0 {
+		return 1
+	}
+	return ms
 }
 
 func (m *Mutex) acquire(ctx context.Context, pool redis.Pool, value string) (bool, error) {
