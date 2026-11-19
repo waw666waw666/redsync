@@ -3,7 +3,6 @@ package redsync
 import (
 	"context"
 	"os"
-	"os/exec"
 	"strconv"
 	"testing"
 	"time"
@@ -33,9 +32,6 @@ type testCase struct {
 }
 
 func makeCases(poolCount int) map[string]*testCase {
-	if len(servers) == 0 {
-		return map[string]*testCase{}
-	}
 	return map[string]*testCase{
 		"redigo": {
 			poolCount,
@@ -81,10 +77,6 @@ func TestMain(m *testing.M) {
 }
 
 func testRunner(m *testing.M) int {
-	if _, err := exec.LookPath("redis-server"); err != nil {
-		// Allow unit tests that do not need Redis to run without redis-server.
-		return m.Run()
-	}
 	for i := range ServerPoolSize * ServerPools {
 		server, err := tempredis.Start(tempredis.Config{
 			"port": strconv.Itoa(51200 + i),
